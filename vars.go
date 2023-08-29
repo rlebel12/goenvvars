@@ -9,7 +9,7 @@ type EnvVar struct {
 	Key           string
 	Value         string
 	Found         bool
-	Optional      bool
+	optional      bool
 	allowFallback func() bool
 }
 
@@ -29,63 +29,74 @@ func New(key string, opts ...envVarOpt) *EnvVar {
 		opt(ev)
 	}
 
-	if !ev.Optional && ev.Value == "" {
-		panic("Missing required environment variable: " + ev.Key)
-	}
-
 	return ev
 }
 
-func Optional() envVarOpt {
-	return func(e *EnvVar) {
-		e.Optional = true
-	}
+func (ev *EnvVar) OverrideAllowFallback(af func() bool) *EnvVar {
+	ev.allowFallback = af
+	return ev
 }
 
-func Fallback(value string, opts ...fallbackOpt) envVarOpt {
-	return func(e *EnvVar) {
-		for _, opt := range opts {
-			opt(e)
+func (ev *EnvVar) Optional() *EnvVar {
+	ev.optional = true
+	return ev
+}
+
+func parseFallbacks[T any](ev *EnvVar, fallbacks ...T) T {
+	canFallback := len(fallbacks) > 0 && ev.allowFallback()
+
+	if ev.optional {
+		var result T
+		if canFallback {
+			result = fallbacks[0]
 		}
+		return result
+	}
 
-		if !e.Found && e.allowFallback() {
-			e.Value = value
+	if canFallback {
+		return fallbacks[0]
+	}
+	panic("Missing required environment variable: " + ev.Key)
+}
+
+func (ev *EnvVar) String(fallbacks ...string) string {
+	if ev.Found {
+		return ev.Value
+	}
+	return parseFallbacks(ev, fallbacks...)
+}
+
+func (ev *EnvVar) Bool(fallbacks ...bool) bool {
+	if ev.Found {
+		value, err := strconv.ParseBool(ev.Value)
+		if err != nil {
+			panic("Invalid boolean environment variable: " + ev.Value)
 		}
+		return value
 	}
+	return parseFallbacks(ev, fallbacks...)
 }
 
-func OverrideAllowFallback(af func() bool) fallbackOpt {
-	return func(e *EnvVar) {
-		e.allowFallback = af
+func (ev *EnvVar) Int(fallbacks ...int) int {
+	if ev.Found {
+		value, err := strconv.Atoi(ev.Value)
+		if err != nil {
+			panic("Invalid integer environment variable: " + ev.Value)
+		}
+		return value
 	}
+	return parseFallbacks(ev, fallbacks...)
 }
 
-func (e EnvVar) String() string {
-	return e.Value
-}
-
-func (e EnvVar) Bool() bool {
-	ret, err := strconv.ParseBool(e.Value)
-	if err != nil {
-		panic("Invalid boolean environment variable: " + e.Value)
+func (ev *EnvVar) Float64(fallbacks ...float64) float64 {
+	if ev.Found {
+		value, err := strconv.ParseFloat(ev.Value, 64)
+		if err != nil {
+			panic("Invalid float64 environment variable: " + ev.Value)
+		}
+		return value
 	}
-	return ret
-}
-
-func (e EnvVar) Int() int {
-	ret, err := strconv.Atoi(e.Value)
-	if err != nil {
-		panic("Invalid integer environment variable: " + e.Value)
-	}
-	return ret
-}
-
-func (e EnvVar) Float64() float64 {
-	ret, err := strconv.ParseFloat(e.Value, 64)
-	if err != nil {
-		panic("Invalid float environment variable: " + e.Value)
-	}
-	return ret
+	return parseFallbacks(ev, fallbacks...)
 }
 
 // Returns true if the environment variable with the given key is set and non-empty
